@@ -1,28 +1,16 @@
-﻿using System.Text;
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
 using Microsoft.Web.WebView2.Core;
-using JsonModel;
-using System.Net.Http;
-using System.Net.Http.Json;
+using System.Net;
+using Windows.Media.Ocr;
+using System.Drawing;
+using FuzzySharp;
 
 namespace WarframeRelicHelper;
-
-/// <summary>
-/// Interaction logic for MainWindow.xaml
-/// </summary>
 public partial class MainWindow : Window
 {
-    private Dictionary<string, string> _primeItems = new();
-    private HttpClient _httpClient = new();
+    private MarketService _marketService = new();
+    private OcrService _ocrService = new();
 
     public MainWindow()
     {
@@ -33,27 +21,11 @@ public partial class MainWindow : Window
         string itemUrl = "https://api." + "warframe.market" + "/v2/items";
         CloudflareBypasser.Source = new Uri(itemUrl);
     }
-    private async Task InitHttpClientFromWebViewAsync()
-    {
-        var baseUri = new Uri("https://api." + "warframe.market" + "/v2/");
-        var webViewCookies = await CloudflareBypasser.CoreWebView2.CookieManager.GetCookiesAsync(baseUri.GetLeftPart(UriPartial.Authority));
-        string userAgent = CloudflareBypasser.CoreWebView2.Settings.UserAgent;
-
-        var cookieContainer = new System.Net.CookieContainer();
-        foreach (var cookie in webViewCookies)
-        {
-            cookieContainer.Add(new System.Net.Cookie(cookie.Name, cookie.Value, cookie.Path, cookie.Domain));
-        }
-
-        var handler = new HttpClientHandler { CookieContainer = cookieContainer };
-        _httpClient = new HttpClient(handler) { BaseAddress = baseUri };
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", userAgent);
-        _httpClient.DefaultRequestHeaders.Add("Platform", "pc");
-        _httpClient.DefaultRequestHeaders.Add("Language", "en");
-    }
 
     private async void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
     {
+        var baseUri = new Uri("https://api." + "warframe.market" + "/v2/");
+
         string rawJson = await CloudflareBypasser.ExecuteScriptAsync("document.body.innerText");
         string cleanJson = JsonSerializer.Deserialize<string>(rawJson) ?? "";
 
@@ -63,30 +35,56 @@ public partial class MainWindow : Window
             return;
         }
 
-        await InitHttpClientFromWebViewAsync();
+        var webViewCookies = await CloudflareBypasser.CoreWebView2.CookieManager.GetCookiesAsync(baseUri.GetLeftPart(UriPartial.Authority));
+        string userAgent = CloudflareBypasser.CoreWebView2.Settings.UserAgent;
+        var cookieContainer = new CookieContainer();
 
-        CloudflareBypasser.NavigationCompleted -= OnNavigationCompleted;
-        var itemResponse = JsonSerializer.Deserialize<V2ItemsResponse>(cleanJson);
-        if (itemResponse?.Data != null)
+        foreach (var cookie in webViewCookies)
         {
-            _primeItems = itemResponse.Data
-                .Where(i => i.Slug.Contains("_prime_") && !i.Slug.EndsWith("_set"))
-                .ToDictionary(i => i.I18n.En.Name.ToLowerInvariant(), i => i.Slug);
+            cookieContainer.Add(new Cookie(cookie.Name, cookie.Value, cookie.Path, cookie.Domain));
         }
 
-        StatusText.Text = $"Check was done! Loading item base. Loaded: {_primeItems.Count}";
+        _marketService.Initialize(cookieContainer, userAgent);
 
-        int? price = await GetLowestPriceViaBrowserAsync("braton_prime_barrel");
-        ResultText.Text = $"Price for braton prime barrel: {price} pl.";
+        CloudflareBypasser.NavigationCompleted -= OnNavigationCompleted;
+
+        int? count = _marketService.GetAllPrimeItems(cleanJson);
+        StatusText.Text = $"Check was done! Loading item base. Loaded: {count}";
+
+        await GetTextAsync();
     }
 
-    private async Task<int?> GetLowestPriceViaBrowserAsync(string slug)
+    private async Task GetTextAsync()
     {
-        var orders = await _httpClient.GetFromJsonAsync<V2OrdersResponse>($"orders/item/{slug}");
-        return orders?.Data?
-            .Where(o => o.Type == "sell" && o.User.Status == "ingame")
-            .OrderBy(o => o.Platinum)
-            .Select(o => (int?)o.Platinum)
-            .FirstOrDefault();
+        int? price = await _marketService.GetLowestPriceAsync("braton_prime_barrel");
+        ResultText.Text = $"Price for braton prime barrel: {price} pl.\n";
+    }
+
+    private async void Button_Click(object sender, RoutedEventArgs e)
+    {
+        var engine = OcrEngine.TryCreateFromLanguage(new Windows.Globalization.Language("en-US"));
+
+        using var fullBmp = new Bitmap("test.jpg");
+
+        var rect = new Rectangle();
+
+        var i = 0;
+        while(i < 4)
+        {
+            rect.X = (int)(fullBmp.Width * (0.252 + i * 0.124));
+            rect.Y = (int)(fullBmp.Height * 0.385);
+            rect.Width = (int)(fullBmp.Width * 0.122);
+            rect.Height = (int)(fullBmp.Height * 0.065);
+            
+            using var crop = fullBmp.Clone(rect, fullBmp.PixelFormat);
+
+            string text = await _ocrService.RecognizeBitmapAsync(crop, engine);
+
+            text += " | Price:" + await _marketService.GetPriceByRawNameAsync(text);
+
+            ResultText.Text += text + "\n";
+
+            i++;
+        }
     }
 }
