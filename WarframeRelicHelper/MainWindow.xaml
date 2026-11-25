@@ -13,7 +13,6 @@
         <StackPanel Grid.Row="0" Margin="10">
             <TextBlock x:Name="StatusText" Text="WebView2 initialisation..." FontSize="14" FontWeight="Bold"/>
             <TextBlock x:Name="ResultText" Text="" FontSize="13" Margin="0,5,0,0" TextWrapping="Wrap"/>
-            <Button Content="Test OCR" Click="Button_Click"/>
         </StackPanel>
 
         <wv2:WebView2 x:Name="CloudflareBypasser" Grid.Row="1"/>

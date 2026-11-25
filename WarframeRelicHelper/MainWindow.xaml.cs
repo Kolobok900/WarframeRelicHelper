@@ -5,12 +5,15 @@ using System.Net;
 using Windows.Media.Ocr;
 using System.Drawing;
 using FuzzySharp;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 
 namespace WarframeRelicHelper;
 public partial class MainWindow : Window
 {
     private MarketService _marketService = new();
     private OcrService _ocrService = new();
+    private IntPtr _windowHandle;
 
     public MainWindow()
     {
@@ -60,31 +63,65 @@ public partial class MainWindow : Window
         ResultText.Text = $"Price for braton prime barrel: {price} pl.\n";
     }
 
-    private async void Button_Click(object sender, RoutedEventArgs e)
+    protected override void OnSourceInitialized(EventArgs e)
     {
+        base.OnSourceInitialized(e);
+        _windowHandle = new WindowInteropHelper(this).Handle;
+        HwndSource.FromHwnd(_windowHandle)?.AddHook(HwndHook);
+
+        RegisterHotKey(_windowHandle, 9000, 0x0000, 0x78);
+    }
+    protected override void OnClosed(EventArgs e)
+    {
+
+        base.OnClosed(e);
+        UnregisterHotKey(_windowHandle, 9000);
+    }
+    private IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int WM_HOTKEY = 0x0312;
+        if (msg == WM_HOTKEY && wParam.ToInt32() == 9000)
+        {
+            ScanRewardsAsync();
+            handled = true;
+        }
+
+        return IntPtr.Zero;
+    }
+
+    private async void ScanRewardsAsync()
+    {
+        ResultText.Text = "";
         var engine = OcrEngine.TryCreateFromLanguage(new Windows.Globalization.Language("en-US"));
 
-        using var fullBmp = new Bitmap("test.jpg");
+        using var fullBmp = _ocrService.CaptureScreen();
 
         var rect = new Rectangle();
 
-        var i = 0;
-        while(i < 4)
+        rect.X = (int)(fullBmp.Width * 0.25);
+        rect.Y = (int)(fullBmp.Height * 0.385);
+        rect.Width = (int)(fullBmp.Width * 0.50);
+        rect.Height = (int)(fullBmp.Height * 0.065);
+
+        using var crop = fullBmp.Clone(rect, fullBmp.PixelFormat);
+
+        var rewards = await _ocrService.RecognizeBitmapAsync(crop, engine);
+
+        foreach (var reward in rewards)
         {
-            rect.X = (int)(fullBmp.Width * (0.252 + i * 0.124));
-            rect.Y = (int)(fullBmp.Height * 0.385);
-            rect.Width = (int)(fullBmp.Width * 0.122);
-            rect.Height = (int)(fullBmp.Height * 0.065);
-            
-            using var crop = fullBmp.Clone(rect, fullBmp.PixelFormat);
-
-            string text = await _ocrService.RecognizeBitmapAsync(crop, engine);
-
-            text += " | Price:" + await _marketService.GetPriceByRawNameAsync(text);
-
-            ResultText.Text += text + "\n";
-
-            i++;
+            try
+            {
+                ResultText.Text += $"{reward} | Price:" + await _marketService.GetPriceByRawNameAsync(reward.ToString()) + " \n";
+            }
+            catch
+            {
+                ResultText.Text += $"{reward} | Price: ? \n";
+            }
+            await Task.Delay(350);
         }
+       
     }
+
+    [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+    [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 }

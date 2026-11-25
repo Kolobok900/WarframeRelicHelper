@@ -48,6 +48,8 @@ namespace WarframeRelicHelper
 
         public async Task<int?> GetPriceByRawNameAsync(string ocrText)
         {
+            if(string.IsNullOrWhiteSpace(ocrText)) return null;
+
             var item = Process.ExtractOne(ocrText.ToLowerInvariant(), _primeItems.Keys);
             if (item.Score >= 85)
             {
