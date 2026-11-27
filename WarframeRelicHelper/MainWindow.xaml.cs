@@ -11,6 +11,9 @@ using System.Windows.Interop;
 namespace WarframeRelicHelper;
 public partial class MainWindow : Window
 {
+    const int GWL_EXSTYLE = -20;
+    const int WS_EX_TRANSPARENT = 0x00000020;
+
     private MarketService _marketService = new();
     private OcrService _ocrService = new();
     private IntPtr _windowHandle;
@@ -50,6 +53,10 @@ public partial class MainWindow : Window
         _marketService.Initialize(cookieContainer, userAgent);
 
         CloudflareBypasser.NavigationCompleted -= OnNavigationCompleted;
+        
+        CloudflareBypasser.Visibility = Visibility.Collapsed;
+
+        SetWindowLong(_windowHandle, GWL_EXSTYLE, GetWindowLong(_windowHandle, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
 
         int? count = _marketService.GetAllPrimeItems(cleanJson);
         StatusText.Text = $"Check was done! Loading item base. Loaded: {count}";
@@ -99,9 +106,9 @@ public partial class MainWindow : Window
         var rect = new Rectangle();
 
         rect.X = (int)(fullBmp.Width * 0.25);
-        rect.Y = (int)(fullBmp.Height * 0.385);
+        rect.Y = (int)(fullBmp.Height * 0.355);
         rect.Width = (int)(fullBmp.Width * 0.50);
-        rect.Height = (int)(fullBmp.Height * 0.065);
+        rect.Height = (int)(fullBmp.Height * 0.095);
 
         using var crop = fullBmp.Clone(rect, fullBmp.PixelFormat);
 
@@ -124,4 +131,6 @@ public partial class MainWindow : Window
 
     [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
     [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+    [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr hWnd, int index);
+    [DllImport("user32.dll")] private static extern int SetWindowLong(IntPtr hWnd, int index, int newStyle);
 }
